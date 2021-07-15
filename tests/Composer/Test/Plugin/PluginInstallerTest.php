@@ -18,7 +18,10 @@ use Composer\Installer\PluginInstaller;
 use Composer\Package\CompletePackage;
 use Composer\Package\Loader\JsonLoader;
 use Composer\Package\Loader\ArrayLoader;
+use Composer\Package\RootPackage;
 use Composer\Plugin\PluginManager;
+use Composer\IO\BufferIO;
+use Composer\EventDispatcher\EventDispatcher;
 use Composer\Autoload\AutoloadGenerator;
 use Composer\Test\TestCase;
 use Composer\Util\Filesystem;
@@ -51,17 +54,17 @@ class PluginInstallerTest extends TestCase
     protected $directory;
 
     /**
-     * @var \PHPUnit_Framework_MockObject_MockObject
+     * @var \PHPUnit\Framework\MockObject\MockObject
      */
     protected $im;
 
     /**
-     * @var \PHPUnit_Framework_MockObject_MockObject
+     * @var \PHPUnit\Framework\MockObject\MockObject
      */
     protected $repository;
 
     /**
-     * @var \PHPUnit_Framework_MockObject_MockObject
+     * @var BufferIO
      */
     protected $io;
 
@@ -89,25 +92,27 @@ class PluginInstallerTest extends TestCase
             ->method('getLocalRepository')
             ->will($this->returnValue($this->repository));
 
-        $im = $this->getMockBuilder('Composer\Installer\InstallationManager')->getMock();
+        $im = $this->getMockBuilder('Composer\Installer\InstallationManager')->disableOriginalConstructor()->getMock();
         $im->expects($this->any())
             ->method('getInstallPath')
             ->will($this->returnCallback(function ($package) {
                 return __DIR__.'/Fixtures/'.$package->getPrettyName();
             }));
 
-        $this->io = $this->getMockBuilder('Composer\IO\IOInterface')->getMock();
+        $this->io = new BufferIO();
 
         $dispatcher = $this->getMockBuilder('Composer\EventDispatcher\EventDispatcher')->disableOriginalConstructor()->getMock();
         $this->autoloadGenerator = new AutoloadGenerator($dispatcher);
 
         $this->composer = new Composer();
-        $config = new Config();
+        $config = new Config(false);
         $this->composer->setConfig($config);
         $this->composer->setDownloadManager($dm);
         $this->composer->setRepositoryManager($rm);
         $this->composer->setInstallationManager($im);
         $this->composer->setAutoloadGenerator($this->autoloadGenerator);
+        $this->composer->setEventDispatcher(new EventDispatcher($this->composer, $this->io));
+        $this->composer->setPackage(new RootPackage('dummy/root', '1.0.0.0', '1.0.0'));
 
         $this->pm = new PluginManager($this->io, $this->composer);
         $this->composer->setPluginManager($this->pm);
@@ -130,7 +135,7 @@ class PluginInstallerTest extends TestCase
     public function testInstallNewPlugin()
     {
         $this->repository
-            ->expects($this->exactly(2))
+            ->expects($this->any())
             ->method('getPackages')
             ->will($this->returnValue(array()));
         $installer = new PluginInstaller($this->io, $this->composer);
@@ -140,12 +145,13 @@ class PluginInstallerTest extends TestCase
 
         $plugins = $this->pm->getPlugins();
         $this->assertEquals('installer-v1', $plugins[0]->version);
+        $this->assertEquals('activate v1'.PHP_EOL, $this->io->getOutput());
     }
 
     public function testInstallMultiplePlugins()
     {
         $this->repository
-            ->expects($this->exactly(2))
+            ->expects($this->any())
             ->method('getPackages')
             ->will($this->returnValue(array($this->packages[3])));
         $installer = new PluginInstaller($this->io, $this->composer);
@@ -158,12 +164,13 @@ class PluginInstallerTest extends TestCase
         $this->assertEquals('installer-v4', $plugins[0]->version);
         $this->assertEquals('plugin2', $plugins[1]->name);
         $this->assertEquals('installer-v4', $plugins[1]->version);
+        $this->assertEquals('activate v4-plugin1'.PHP_EOL.'activate v4-plugin2'.PHP_EOL, $this->io->getOutput());
     }
 
     public function testUpgradeWithNewClassName()
     {
         $this->repository
-            ->expects($this->exactly(3))
+            ->expects($this->any())
             ->method('getPackages')
             ->will($this->returnValue(array($this->packages[0])));
         $this->repository
@@ -176,13 +183,35 @@ class PluginInstallerTest extends TestCase
         $installer->update($this->repository, $this->packages[0], $this->packages[1]);
 
         $plugins = $this->pm->getPlugins();
+        $this->assertCount(1, $plugins);
         $this->assertEquals('installer-v2', $plugins[1]->version);
+        $this->assertEquals('activate v1'.PHP_EOL.'deactivate v1'.PHP_EOL.'activate v2'.PHP_EOL, $this->io->getOutput());
+    }
+
+    public function testUninstall()
+    {
+        $this->repository
+            ->expects($this->any())
+            ->method('getPackages')
+            ->will($this->returnValue(array($this->packages[0])));
+        $this->repository
+            ->expects($this->exactly(1))
+            ->method('hasPackage')
+            ->will($this->onConsecutiveCalls(true, false));
+        $installer = new PluginInstaller($this->io, $this->composer);
+        $this->pm->loadInstalledPlugins();
+
+        $installer->uninstall($this->repository, $this->packages[0]);
+
+        $plugins = $this->pm->getPlugins();
+        $this->assertCount(0, $plugins);
+        $this->assertEquals('activate v1'.PHP_EOL.'deactivate v1'.PHP_EOL.'uninstall v1'.PHP_EOL, $this->io->getOutput());
     }
 
     public function testUpgradeWithSameClassName()
     {
         $this->repository
-            ->expects($this->exactly(3))
+            ->expects($this->any())
             ->method('getPackages')
             ->will($this->returnValue(array($this->packages[1])));
         $this->repository
@@ -196,12 +225,13 @@ class PluginInstallerTest extends TestCase
 
         $plugins = $this->pm->getPlugins();
         $this->assertEquals('installer-v3', $plugins[1]->version);
+        $this->assertEquals('activate v2'.PHP_EOL.'deactivate v2'.PHP_EOL.'activate v3'.PHP_EOL, $this->io->getOutput());
     }
 
     public function testRegisterPluginOnlyOneTime()
     {
         $this->repository
-            ->expects($this->exactly(2))
+            ->expects($this->any())
             ->method('getPackages')
             ->will($this->returnValue(array()));
         $installer = new PluginInstaller($this->io, $this->composer);
@@ -213,6 +243,7 @@ class PluginInstallerTest extends TestCase
         $plugins = $this->pm->getPlugins();
         $this->assertCount(1, $plugins);
         $this->assertEquals('installer-v1', $plugins[0]->version);
+        $this->assertEquals('activate v1'.PHP_EOL, $this->io->getOutput());
     }
 
     /**
@@ -240,11 +271,11 @@ class PluginInstallerTest extends TestCase
 
         // Add the plugins to the repo along with the internal Plugin package on which they all rely.
         $this->repository
-             ->expects($this->any())
-             ->method('getPackages')
-             ->will($this->returnCallback(function () use ($plugApiInternalPackage, $plugins) {
-                 return array_merge(array($plugApiInternalPackage), $plugins);
-             }));
+            ->expects($this->any())
+            ->method('getPackages')
+            ->will($this->returnCallback(function () use ($plugApiInternalPackage, $plugins) {
+                return array_merge(array($plugApiInternalPackage), $plugins);
+            }));
 
         $this->pm->loadInstalledPlugins();
     }
@@ -300,12 +331,13 @@ class PluginInstallerTest extends TestCase
     public function testCommandProviderCapability()
     {
         $this->repository
-            ->expects($this->exactly(2))
+            ->expects($this->any())
             ->method('getPackages')
             ->will($this->returnValue(array($this->packages[7])));
         $installer = new PluginInstaller($this->io, $this->composer);
         $this->pm->loadInstalledPlugins();
 
+        /** @var \Composer\Plugin\Capability\CommandProvider[] $caps */
         $caps = $this->pm->getPluginCapabilities('Composer\Plugin\Capability\CommandProvider', array('composer' => $this->composer, 'io' => $this->io));
         $this->assertCount(1, $caps);
         $this->assertInstanceOf('Composer\Plugin\Capability\CommandProvider', $caps[0]);
@@ -337,6 +369,7 @@ class PluginInstallerTest extends TestCase
                    return array($capabilityApi => $capabilityImplementation);
                }));
 
+        /** @var \Composer\Test\Plugin\Mock\Capability $capability */
         $capability = $this->pm->getPluginCapability($plugin, $capabilityApi, array('a' => 1, 'b' => 2));
 
         $this->assertInstanceOf($capabilityApi, $capability);
@@ -368,10 +401,11 @@ class PluginInstallerTest extends TestCase
 
     /**
      * @dataProvider invalidImplementationClassNames
-     * @expectedException \UnexpectedValueException
      */
-    public function testQueryingWithInvalidCapabilityClassNameThrows($invalidImplementationClassNames)
+    public function testQueryingWithInvalidCapabilityClassNameThrows($invalidImplementationClassNames, $expect = 'UnexpectedValueException')
     {
+        $this->setExpectedException($expect);
+
         $capabilityApi = 'Composer\Plugin\Capability\Capability';
 
         $plugin = $this->getMockBuilder('Composer\Test\Plugin\Mock\CapablePluginInterface')
@@ -404,10 +438,9 @@ class PluginInstallerTest extends TestCase
 
     /**
      * @dataProvider nonExistingOrInvalidImplementationClassTypes
-     * @expectedException \RuntimeException
      */
     public function testQueryingWithNonExistingOrWrongCapabilityClassTypesThrows($wrongImplementationClassTypes)
     {
-        $this->testQueryingWithInvalidCapabilityClassNameThrows($wrongImplementationClassTypes);
+        $this->testQueryingWithInvalidCapabilityClassNameThrows($wrongImplementationClassTypes, 'RuntimeException');
     }
 }

@@ -96,6 +96,16 @@ class ClassMapGeneratorTest extends TestCase
                 'Dummy\Test\AnonClassHolder' => __DIR__ . '/Fixtures/php7.0/anonclass.php',
             ));
         }
+
+        if (PHP_VERSION_ID >= 80100) {
+            $data[] = array(__DIR__ . '/Fixtures/php8.1', array(
+                'RolesBasicEnum' => __DIR__ . '/Fixtures/php8.1/enum_basic.php',
+                'RolesBackedEnum' => __DIR__ . '/Fixtures/php8.1/enum_backed.php',
+                'RolesClassLikeEnum' => __DIR__ . '/Fixtures/php8.1/enum_class_semantics.php',
+                'Foo\Bar\RolesClassLikeNamespacedEnum' => __DIR__ . '/Fixtures/php8.1/enum_namespaced.php',
+            ));
+        }
+
         if (defined('HHVM_VERSION') && version_compare(HHVM_VERSION, '3.3', '>=')) {
             $data[] = array(__DIR__ . '/Fixtures/hhvm3.3', array(
                 'FooEnum' => __DIR__ . '/Fixtures/hhvm3.3/HackEnum.php',
@@ -120,16 +130,13 @@ class ClassMapGeneratorTest extends TestCase
         ), ClassMapGenerator::createMap($finder));
     }
 
-    /**
-     * @expectedException \RuntimeException
-     * @expectedExceptionMessage does not exist
-     */
     public function testFindClassesThrowsWhenFileDoesNotExist()
     {
         $r = new \ReflectionClass('Composer\\Autoload\\ClassMapGenerator');
         $find = $r->getMethod('findClasses');
         $find->setAccessible(true);
 
+        $this->setExpectedException('RuntimeException', 'does not exist');
         $find->invoke(null, __DIR__ . '/no-file');
     }
 
@@ -213,12 +220,9 @@ class ClassMapGeneratorTest extends TestCase
         $fs->removeDirectory($tempDir);
     }
 
-    /**
-     * @expectedException \RuntimeException
-     * @expectedExceptionMessage Could not scan for classes inside
-     */
     public function testCreateMapThrowsWhenDirectoryDoesNotExist()
     {
+        $this->setExpectedException('RuntimeException', 'Could not scan for classes inside');
         ClassMapGenerator::createMap(__DIR__ . '/no-file.no-foler');
     }
 
@@ -240,7 +244,7 @@ class ClassMapGeneratorTest extends TestCase
         $fs->removeDirectory($tempDir);
     }
 
-    protected function assertEqualsNormalized($expected, $actual, $message = null)
+    protected function assertEqualsNormalized($expected, $actual, $message = '')
     {
         foreach ($expected as $ns => $path) {
             $expected[$ns] = strtr($path, '\\', '/');

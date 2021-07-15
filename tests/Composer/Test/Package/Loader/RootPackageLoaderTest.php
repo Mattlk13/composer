@@ -15,9 +15,10 @@ namespace Composer\Test\Package\Loader;
 use Composer\Config;
 use Composer\Package\Loader\RootPackageLoader;
 use Composer\Package\BasePackage;
+use Composer\Package\RootPackage;
 use Composer\Package\Version\VersionGuesser;
 use Composer\Semver\VersionParser;
-use PHPUnit\Framework\TestCase;
+use Composer\Test\TestCase;
 use Prophecy\Argument;
 
 class RootPackageLoaderTest extends TestCase
@@ -46,8 +47,8 @@ class RootPackageLoaderTest extends TestCase
                 'zux/complex' => '~1.0,>=1.0.2@dev',
                 'or/op' => '^2.0@dev || ^2.0@dev',
                 'multi/lowest-wins' => '^2.0@rc || >=3.0@dev , ~3.5@alpha',
-                'or/op/without-flags' => 'dev-master || 2.0 , ~3.5-alpha',
-                'or/op/without-flags2' => '3.0-beta || 2.0 , ~3.5-alpha',
+                'or/op-without-flags' => 'dev-master || 2.0 , ~3.5-alpha',
+                'or/op-without-flags2' => '3.0-beta || 2.0 , ~3.5-alpha',
             ),
             'minimum-stability' => 'alpha',
         ));
@@ -59,8 +60,8 @@ class RootPackageLoaderTest extends TestCase
             'zux/complex' => BasePackage::STABILITY_DEV,
             'or/op' => BasePackage::STABILITY_DEV,
             'multi/lowest-wins' => BasePackage::STABILITY_DEV,
-            'or/op/without-flags' => BasePackage::STABILITY_DEV,
-            'or/op/without-flags2' => BasePackage::STABILITY_ALPHA,
+            'or/op-without-flags' => BasePackage::STABILITY_DEV,
+            'or/op-without-flags2' => BasePackage::STABILITY_ALPHA,
         ), $package->getStabilityFlags());
     }
 
@@ -90,7 +91,7 @@ class RootPackageLoaderTest extends TestCase
         $package = $loader->load(array());
 
         $this->assertEquals("1.0.0.0", $package->getVersion());
-        $this->assertEquals("No version set (parsed as 1.0.0)", $package->getPrettyVersion());
+        $this->assertEquals(RootPackage::DEFAULT_PRETTY_VERSION, $package->getPrettyVersion());
     }
 
     public function testPrettyVersionForRootPackageInVersionBranch()
@@ -137,7 +138,7 @@ class RootPackageLoaderTest extends TestCase
             ->expects($this->at(0))
             ->method('execute')
             ->willReturnCallback(function ($command, &$output) use ($self) {
-                $self->assertEquals('git branch --no-color --no-abbrev -v', $command);
+                $self->assertEquals('git branch -a --no-color --no-abbrev -v', $command);
                 $output = "* latest-production 38137d2f6c70e775e137b2d8a7a7d3eaebf7c7e5 Commit message\n  master 4f6ed96b0bc363d2aa4404c3412de1c011f67c66 Commit message\n";
 
                 return 0;
@@ -187,7 +188,7 @@ class RootPackageLoaderTest extends TestCase
             ->expects($this->at(0))
             ->method('execute')
             ->willReturnCallback(function ($command, &$output) use ($self) {
-                $self->assertEquals('git branch --no-color --no-abbrev -v', $command);
+                $self->assertEquals('git branch -a --no-color --no-abbrev -v', $command);
                 $output = "* latest-production 38137d2f6c70e775e137b2d8a7a7d3eaebf7c7e5 Commit message\n  master 4f6ed96b0bc363d2aa4404c3412de1c011f67c66 Commit message\n";
 
                 return 0;

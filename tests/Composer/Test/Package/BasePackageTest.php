@@ -13,10 +13,13 @@
 namespace Composer\Test\Package;
 
 use Composer\Package\BasePackage;
-use PHPUnit\Framework\TestCase;
+use Composer\Test\TestCase;
 
 class BasePackageTest extends TestCase
 {
+    /**
+     * @doesNotPerformAssertions
+     */
     public function testSetSameRepository()
     {
         $package = $this->getMockForAbstractClass('Composer\Package\BasePackage', array('foo'));
@@ -30,11 +33,10 @@ class BasePackageTest extends TestCase
         }
     }
 
-    /**
-     * @expectedException LogicException
-     */
     public function testSetAnotherRepository()
     {
+        $this->setExpectedException('LogicException');
+
         $package = $this->getMockForAbstractClass('Composer\Package\BasePackage', array('foo'));
 
         $package->setRepository($this->getMockBuilder('Composer\Repository\RepositoryInterface')->getMock());
@@ -78,7 +80,7 @@ class BasePackageTest extends TestCase
         $createPackage = function ($arr) use ($self) {
             $package = $self->getMockForAbstractClass('\Composer\Package\BasePackage', array(), '', false);
             $package->expects($self->once())->method('isDev')->will($self->returnValue(true));
-            $package->expects($self->once())->method('getSourceType')->will($self->returnValue('git'));
+            $package->expects($self->any())->method('getSourceType')->will($self->returnValue('git'));
             $package->expects($self->once())->method('getPrettyVersion')->will($self->returnValue('PrettyVersion'));
             $package->expects($self->any())->method('getSourceReference')->will($self->returnValue($arr['sourceReference']));
 

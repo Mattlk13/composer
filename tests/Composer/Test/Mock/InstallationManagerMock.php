@@ -13,9 +13,9 @@
 namespace Composer\Test\Mock;
 
 use Composer\Installer\InstallationManager;
-use Composer\Repository\RepositoryInterface;
 use Composer\Repository\InstalledRepositoryInterface;
 use Composer\Package\PackageInterface;
+use Composer\IO\IOInterface;
 use Composer\DependencyResolver\Operation\InstallOperation;
 use Composer\DependencyResolver\Operation\UpdateOperation;
 use Composer\DependencyResolver\Operation\UninstallOperation;
@@ -29,6 +29,19 @@ class InstallationManagerMock extends InstallationManager
     private $uninstalled = array();
     private $trace = array();
 
+    public function __construct()
+    {
+    }
+
+    public function execute(InstalledRepositoryInterface $repo, array $operations, $devMode = true, $runScripts = true)
+    {
+        foreach ($operations as $operation) {
+            $method = $operation->getOperationType();
+            // skipping download() step here for tests
+            $this->$method($repo, $operation);
+        }
+    }
+
     public function getInstallPath(PackageInterface $package)
     {
         return '';
@@ -39,42 +52,44 @@ class InstallationManagerMock extends InstallationManager
         return $repo->hasPackage($package);
     }
 
-    public function install(RepositoryInterface $repo, InstallOperation $operation)
+    public function install(InstalledRepositoryInterface $repo, InstallOperation $operation)
     {
         $this->installed[] = $operation->getPackage();
-        $this->trace[] = (string) $operation;
+        $this->trace[] = strip_tags((string) $operation);
         $repo->addPackage(clone $operation->getPackage());
     }
 
-    public function update(RepositoryInterface $repo, UpdateOperation $operation)
+    public function update(InstalledRepositoryInterface $repo, UpdateOperation $operation)
     {
         $this->updated[] = array($operation->getInitialPackage(), $operation->getTargetPackage());
-        $this->trace[] = (string) $operation;
+        $this->trace[] = strip_tags((string) $operation);
         $repo->removePackage($operation->getInitialPackage());
-        $repo->addPackage(clone $operation->getTargetPackage());
+        if (!$repo->hasPackage($operation->getTargetPackage())) {
+            $repo->addPackage(clone $operation->getTargetPackage());
+        }
     }
 
-    public function uninstall(RepositoryInterface $repo, UninstallOperation $operation)
+    public function uninstall(InstalledRepositoryInterface $repo, UninstallOperation $operation)
     {
         $this->uninstalled[] = $operation->getPackage();
-        $this->trace[] = (string) $operation;
+        $this->trace[] = strip_tags((string) $operation);
         $repo->removePackage($operation->getPackage());
     }
 
-    public function markAliasInstalled(RepositoryInterface $repo, MarkAliasInstalledOperation $operation)
+    public function markAliasInstalled(InstalledRepositoryInterface $repo, MarkAliasInstalledOperation $operation)
     {
         $package = $operation->getPackage();
 
         $this->installed[] = $package;
-        $this->trace[] = (string) $operation;
+        $this->trace[] = strip_tags((string) $operation);
 
         parent::markAliasInstalled($repo, $operation);
     }
 
-    public function markAliasUninstalled(RepositoryInterface $repo, MarkAliasUninstalledOperation $operation)
+    public function markAliasUninstalled(InstalledRepositoryInterface $repo, MarkAliasUninstalledOperation $operation)
     {
         $this->uninstalled[] = $operation->getPackage();
-        $this->trace[] = (string) $operation;
+        $this->trace[] = strip_tags((string) $operation);
 
         parent::markAliasUninstalled($repo, $operation);
     }
@@ -97,5 +112,15 @@ class InstallationManagerMock extends InstallationManager
     public function getUninstalledPackages()
     {
         return $this->uninstalled;
+    }
+
+    public function notifyInstalls(IOInterface $io)
+    {
+        // noop
+    }
+
+    public function getInstalledPackagesByType()
+    {
+        return $this->installed;
     }
 }

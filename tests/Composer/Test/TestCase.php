@@ -13,14 +13,16 @@
 namespace Composer\Test;
 
 use Composer\Semver\VersionParser;
-use Composer\Package\AliasPackage;
+use Composer\Package\RootPackageInterface;
+use Composer\Package\PackageInterface;
 use Composer\Semver\Constraint\Constraint;
 use Composer\Util\Filesystem;
 use Composer\Util\Silencer;
-use PHPUnit\Framework\TestCase as BaseTestCase;
 use Symfony\Component\Process\ExecutableFinder;
+use Composer\Package\Loader\ArrayLoader;
+use Composer\Package\BasePackage;
 
-abstract class TestCase extends BaseTestCase
+abstract class TestCase extends PolyfillTestCase
 {
     private static $parser;
     private static $executableCache = array();
@@ -73,7 +75,31 @@ abstract class TestCase extends BaseTestCase
     {
         $normVersion = self::getVersionParser()->normalize($version);
 
-        return new AliasPackage($package, $normVersion, $version);
+        $class = 'Composer\Package\AliasPackage';
+        if ($package instanceof RootPackageInterface) {
+            $class = 'Composer\Package\RootAliasPackage';
+        }
+
+        return new $class($package, $normVersion, $version);
+    }
+
+    protected function configureLinks(PackageInterface $package, array $config)
+    {
+        $arrayLoader = new ArrayLoader();
+
+        foreach (BasePackage::$supportedLinkTypes as $type => $opts) {
+            if (isset($config[$type])) {
+                $method = 'set'.ucfirst($opts['method']);
+                $package->{$method}(
+                    $arrayLoader->parseLinks(
+                        $package->getName(),
+                        $package->getPrettyVersion(),
+                        $opts['description'],
+                        $config[$type]
+                    )
+                );
+            }
+        }
     }
 
     protected static function ensureDirectoryExistsAndClear($directory)
@@ -92,7 +118,7 @@ abstract class TestCase extends BaseTestCase
      *
      * @param string $executableName The name of the binary to test.
      *
-     * @throws \PHPUnit_Framework_SkippedTestError
+     * @throws \PHPUnit\Framework\SkippedTestError
      */
     protected function skipIfNotExecutable($executableName)
     {
@@ -103,6 +129,26 @@ abstract class TestCase extends BaseTestCase
 
         if (false === self::$executableCache[$executableName]) {
             $this->markTestSkipped($executableName . ' is not found or not executable.');
+        }
+    }
+
+    /**
+     * @param string      $exception
+     * @param string|null $message
+     * @param int|null    $code
+     */
+    public function setExpectedException($exception, $message = null, $code = null)
+    {
+        if (!class_exists('PHPUnit\Framework\Error\Notice')) {
+            $exception = str_replace('PHPUnit\\Framework\\Error\\', 'PHPUnit_Framework_Error_', $exception);
+        }
+        if (method_exists($this, 'expectException')) {
+            $this->expectException($exception);
+            if (null !== $message) {
+                $this->expectExceptionMessage($message);
+            }
+        } else {
+            parent::setExpectedException($exception, $message, $code);
         }
     }
 }

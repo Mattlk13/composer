@@ -13,8 +13,7 @@
 namespace Composer\Test\Question;
 
 use Composer\Question\StrictConfirmationQuestion;
-use PHPUnit\Framework\TestCase;
-use Symfony\Component\Console\Exception\InvalidArgumentException;
+use Composer\Test\TestCase;
 use Symfony\Component\Console\Helper\QuestionHelper;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\StreamableInputInterface;
@@ -38,13 +37,13 @@ class StrictConfirmationQuestionTest extends TestCase
     }
 
     /**
-     * @expectedException InvalidArgumentException
-     * @expectedExceptionMessage Please answer yes, y, no, or n.
      * @dataProvider             getAskConfirmationBadData
      */
     public function testAskConfirmationBadAnswer($answer)
     {
         list($input, $dialog) = $this->createInput($answer."\n");
+
+        $this->setExpectedException('InvalidArgumentException', 'Please answer yes, y, no, or n.');
 
         $question = new StrictConfirmationQuestion('Do you like French fries?');
         $question->setMaxAttempts(1);

@@ -12,9 +12,15 @@
 
 namespace Composer\Test;
 
+use Composer\DependencyResolver\Request;
 use Composer\Installer;
-use Composer\Console\Application;
+use Symfony\Component\Console\Application;
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
+use Composer\IO\BufferIO;
 use Composer\Json\JsonFile;
+use Composer\Package\Dumper\ArrayDumper;
 use Composer\Util\Filesystem;
 use Composer\Repository\ArrayRepository;
 use Composer\Repository\RepositoryManager;
@@ -29,8 +35,6 @@ use Symfony\Component\Console\Input\StringInput;
 use Symfony\Component\Console\Output\StreamOutput;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Formatter\OutputFormatter;
-use Composer\Test\TestCase;
-use Composer\IO\BufferIO;
 
 class InstallerTest extends TestCase
 {
@@ -57,14 +61,16 @@ class InstallerTest extends TestCase
      */
     public function testInstaller(RootPackageInterface $rootPackage, $repositories, array $options)
     {
-        $io = $this->getMockBuilder('Composer\IO\IOInterface')->getMock();
+        $io = new BufferIO('', OutputInterface::VERBOSITY_NORMAL, new OutputFormatter(false));
 
         $downloadManager = $this->getMockBuilder('Composer\Downloader\DownloadManager')
             ->setConstructorArgs(array($io))
             ->getMock();
         $config = $this->getMockBuilder('Composer\Config')->getMock();
 
-        $repositoryManager = new RepositoryManager($io, $config);
+        $eventDispatcher = $this->getMockBuilder('Composer\EventDispatcher\EventDispatcher')->disableOriginalConstructor()->getMock();
+        $httpDownloader = $this->getMockBuilder('Composer\Util\HttpDownloader')->disableOriginalConstructor()->getMock();
+        $repositoryManager = new RepositoryManager($io, $config, $httpDownloader, $eventDispatcher);
         $repositoryManager->setLocalRepository(new InstalledArrayRepository());
 
         if (!is_array($repositories)) {
@@ -73,29 +79,63 @@ class InstallerTest extends TestCase
         foreach ($repositories as $repository) {
             $repositoryManager->addRepository($repository);
         }
-
-        $locker = $this->getMockBuilder('Composer\Package\Locker')->disableOriginalConstructor()->getMock();
         $installationManager = new InstallationManagerMock();
 
-        $eventDispatcher = $this->getMockBuilder('Composer\EventDispatcher\EventDispatcher')->disableOriginalConstructor()->getMock();
+        // emulate a writable lock file
+        /** @var ?string $lockData */
+        $lockData = null;
+        $lockJsonMock = $this->getMockBuilder('Composer\Json\JsonFile')->disableOriginalConstructor()->getMock();
+        $lockJsonMock->expects($this->any())
+            ->method('read')
+            ->will($this->returnCallback(function () use (&$lockData) {
+                return json_decode($lockData, true);
+            }));
+        $lockJsonMock->expects($this->any())
+            ->method('exists')
+            ->will($this->returnCallback(function () use (&$lockData) {
+                return $lockData !== null;
+            }));
+        $lockJsonMock->expects($this->any())
+            ->method('write')
+            ->will($this->returnCallback(function ($value, $options = 0) use (&$lockData) {
+                $lockData = json_encode($value, JsonFile::JSON_PRETTY_PRINT);
+            }));
+
+        $tempLockData = null;
+        $locker = new Locker($io, $lockJsonMock, $installationManager, '{}');
+
         $autoloadGenerator = $this->getMockBuilder('Composer\Autoload\AutoloadGenerator')->disableOriginalConstructor()->getMock();
 
         $installer = new Installer($io, $config, clone $rootPackage, $downloadManager, $repositoryManager, $locker, $installationManager, $eventDispatcher, $autoloadGenerator);
         $result = $installer->run();
-        $this->assertSame(0, $result);
+
+        $output = str_replace("\r", '', $io->getOutput());
+        $this->assertEquals(0, $result, $output);
 
         $expectedInstalled = isset($options['install']) ? $options['install'] : array();
         $expectedUpdated = isset($options['update']) ? $options['update'] : array();
         $expectedUninstalled = isset($options['uninstall']) ? $options['uninstall'] : array();
 
         $installed = $installationManager->getInstalledPackages();
-        $this->assertSame($expectedInstalled, $installed);
+        $this->assertEquals($this->makePackagesComparable($expectedInstalled), $this->makePackagesComparable($installed));
 
         $updated = $installationManager->getUpdatedPackages();
         $this->assertSame($expectedUpdated, $updated);
 
         $uninstalled = $installationManager->getUninstalledPackages();
         $this->assertSame($expectedUninstalled, $uninstalled);
+    }
+
+    protected function makePackagesComparable($packages)
+    {
+        $dumper = new ArrayDumper();
+
+        $comparable = array();
+        foreach ($packages as $package) {
+            $comparable[] = $dumper->dump($package);
+        }
+
+        return $comparable;
     }
 
     public function provideInstaller()
@@ -107,11 +147,11 @@ class InstallerTest extends TestCase
 
         $a = $this->getPackage('A', '1.0.0', 'Composer\Package\RootPackage');
         $a->setRequires(array(
-            new Link('A', 'B', $this->getVersionConstraint('=', '1.0.0')),
+            'b' => new Link('A', 'B', $v = $this->getVersionConstraint('=', '1.0.0'), Link::TYPE_REQUIRE, $v->getPrettyString()),
         ));
         $b = $this->getPackage('B', '1.0.0');
         $b->setRequires(array(
-            new Link('B', 'A', $this->getVersionConstraint('=', '1.0.0')),
+            'a' => new Link('B', 'A', $v = $this->getVersionConstraint('=', '1.0.0'), Link::TYPE_REQUIRE, $v->getPrettyString()),
         ));
 
         $cases[] = array(
@@ -127,11 +167,11 @@ class InstallerTest extends TestCase
 
         $a = $this->getPackage('A', '1.0.0', 'Composer\Package\RootPackage');
         $a->setRequires(array(
-            new Link('A', 'B', $this->getVersionConstraint('=', '1.0.0')),
+            'b' => new Link('A', 'B', $v = $this->getVersionConstraint('=', '1.0.0'), Link::TYPE_REQUIRE, $v->getPrettyString()),
         ));
         $b = $this->getPackage('B', '1.0.0');
         $b->setRequires(array(
-            new Link('B', 'A', $this->getVersionConstraint('=', '1.0.0')),
+            'a' => new Link('B', 'A', $v = $this->getVersionConstraint('=', '1.0.0'), Link::TYPE_REQUIRE, $v->getPrettyString()),
         ));
 
         $cases[] = array(
@@ -142,13 +182,23 @@ class InstallerTest extends TestCase
             ),
         );
 
+        // TODO why are there not more cases with uninstall/update?
         return $cases;
+    }
+
+    /**
+     * @group slow
+     * @dataProvider getSlowIntegrationTests
+     */
+    public function testSlowIntegration($file, $message, $condition, $composerConfig, $lock, $installed, $run, $expectLock, $expectInstalled, $expectOutput, $expect, $expectResult)
+    {
+        return $this->testIntegration($file, $message, $condition, $composerConfig, $lock, $installed, $run, $expectLock, $expectInstalled, $expectOutput, $expect, $expectResult);
     }
 
     /**
      * @dataProvider getIntegrationTests
      */
-    public function testIntegration($file, $message, $condition, $composerConfig, $lock, $installed, $run, $expectLock, $expectOutput, $expect, $expectResult)
+    public function testIntegration($file, $message, $condition, $composerConfig, $lock, $installed, $run, $expectLock, $expectInstalled, $expectOutput, $expect, $expectResult)
     {
         if ($condition) {
             eval('$res = '.$condition.';');
@@ -180,13 +230,24 @@ class InstallerTest extends TestCase
         $repositoryManager = $composer->getRepositoryManager();
         $repositoryManager->setLocalRepository(new InstalledFilesystemRepositoryMock($jsonMock));
 
+        // emulate a writable lock file
+        $lockData = $lock ? json_encode($lock, JsonFile::JSON_PRETTY_PRINT) : null;
         $lockJsonMock = $this->getMockBuilder('Composer\Json\JsonFile')->disableOriginalConstructor()->getMock();
         $lockJsonMock->expects($this->any())
             ->method('read')
-            ->will($this->returnValue($lock));
+            ->will($this->returnCallback(function () use (&$lockData) {
+                return json_decode($lockData, true);
+            }));
         $lockJsonMock->expects($this->any())
             ->method('exists')
-            ->will($this->returnValue(true));
+            ->will($this->returnCallback(function () use (&$lockData) {
+                return $lockData !== null;
+            }));
+        $lockJsonMock->expects($this->any())
+            ->method('write')
+            ->will($this->returnCallback(function ($value, $options = 0) use (&$lockData) {
+                $lockData = json_encode($value, JsonFile::JSON_PRETTY_PRINT);
+            }));
 
         if ($expectLock) {
             $actualLock = array();
@@ -203,7 +264,7 @@ class InstallerTest extends TestCase
         }
 
         $contents = json_encode($composerConfig);
-        $locker = new Locker($io, $lockJsonMock, $repositoryManager, $composer->getInstallationManager(), $contents);
+        $locker = new Locker($io, $lockJsonMock, $composer->getInstallationManager(), $contents);
         $composer->setLocker($locker);
 
         $eventDispatcher = $this->getMockBuilder('Composer\EventDispatcher\EventDispatcher')->disableOriginalConstructor()->getMock();
@@ -216,29 +277,67 @@ class InstallerTest extends TestCase
         $installer = Installer::create($io, $composer);
 
         $application = new Application;
-        $application->get('install')->setCode(function ($input, $output) use ($installer) {
+        $install = new Command('install');
+        $install->addOption('ignore-platform-reqs', null, InputOption::VALUE_NONE);
+        $install->addOption('ignore-platform-req', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY);
+        $install->addOption('no-dev', null, InputOption::VALUE_NONE);
+        $install->addOption('dry-run', null, InputOption::VALUE_NONE);
+        $install->setCode(function ($input, $output) use ($installer) {
+            $ignorePlatformReqs = $input->getOption('ignore-platform-reqs') ?: ($input->getOption('ignore-platform-req') ?: false);
+
             $installer
                 ->setDevMode(!$input->getOption('no-dev'))
                 ->setDryRun($input->getOption('dry-run'))
-                ->setIgnorePlatformRequirements($input->getOption('ignore-platform-reqs'));
+                ->setIgnorePlatformRequirements($ignorePlatformReqs);
 
             return $installer->run();
         });
+        $application->add($install);
 
-        $application->get('update')->setCode(function ($input, $output) use ($installer) {
+        $update = new Command('update');
+        $update->addOption('ignore-platform-reqs', null, InputOption::VALUE_NONE);
+        $update->addOption('ignore-platform-req', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY);
+        $update->addOption('no-dev', null, InputOption::VALUE_NONE);
+        $update->addOption('no-install', null, InputOption::VALUE_NONE);
+        $update->addOption('dry-run', null, InputOption::VALUE_NONE);
+        $update->addOption('lock', null, InputOption::VALUE_NONE);
+        $update->addOption('with-all-dependencies', null, InputOption::VALUE_NONE);
+        $update->addOption('with-dependencies', null, InputOption::VALUE_NONE);
+        $update->addOption('prefer-stable', null, InputOption::VALUE_NONE);
+        $update->addOption('prefer-lowest', null, InputOption::VALUE_NONE);
+        $update->addArgument('packages', InputArgument::IS_ARRAY | InputArgument::OPTIONAL);
+        $update->setCode(function ($input, $output) use ($installer) {
+            $packages = $input->getArgument('packages');
+            $filteredPackages = array_filter($packages, function ($package) {
+                return !in_array($package, array('lock', 'nothing', 'mirrors'), true);
+            });
+            $updateMirrors = $input->getOption('lock') || count($filteredPackages) != count($packages);
+            $packages = $filteredPackages;
+
+            $updateAllowTransitiveDependencies = Request::UPDATE_ONLY_LISTED;
+            if ($input->getOption('with-all-dependencies')) {
+                $updateAllowTransitiveDependencies = Request::UPDATE_LISTED_WITH_TRANSITIVE_DEPS;
+            } elseif ($input->getOption('with-dependencies')) {
+                $updateAllowTransitiveDependencies = Request::UPDATE_LISTED_WITH_TRANSITIVE_DEPS_NO_ROOT_REQUIRE;
+            }
+
+            $ignorePlatformReqs = $input->getOption('ignore-platform-reqs') ?: ($input->getOption('ignore-platform-req') ?: false);
+
             $installer
                 ->setDevMode(!$input->getOption('no-dev'))
                 ->setUpdate(true)
+                ->setInstall(!$input->getOption('no-install'))
                 ->setDryRun($input->getOption('dry-run'))
-                ->setUpdateWhitelist($input->getArgument('packages'))
-                ->setWhitelistTransitiveDependencies($input->getOption('with-dependencies'))
-                ->setWhitelistAllDependencies($input->getOption('with-all-dependencies'))
+                ->setUpdateMirrors($updateMirrors)
+                ->setUpdateAllowList($packages)
+                ->setUpdateAllowTransitiveDependencies($updateAllowTransitiveDependencies)
                 ->setPreferStable($input->getOption('prefer-stable'))
                 ->setPreferLowest($input->getOption('prefer-lowest'))
-                ->setIgnorePlatformRequirements($input->getOption('ignore-platform-reqs'));
+                ->setIgnorePlatformRequirements($ignorePlatformReqs);
 
             return $installer->run();
         });
+        $application->add($update);
 
         if (!preg_match('{^(install|update)\b}', $run)) {
             throw new \UnexpectedValueException('The run command only supports install and update');
@@ -246,7 +345,7 @@ class InstallerTest extends TestCase
 
         $application->setAutoExit(false);
         $appOutput = fopen('php://memory', 'w+');
-        $input = new StringInput($run);
+        $input = new StringInput($run.' -vvv');
         $input->setInteractive(false);
         $result = $application->run($input, new StreamOutput($appOutput));
         fseek($appOutput, 0);
@@ -258,24 +357,53 @@ class InstallerTest extends TestCase
 
         $output = str_replace("\r", '', $io->getOutput());
         $this->assertEquals($expectResult, $result, $output . stream_get_contents($appOutput));
-        if ($expectLock) {
-            unset($actualLock['hash']);
-            unset($actualLock['content-hash']);
-            unset($actualLock['_readme']);
+        if ($expectLock && isset($actualLock)) {
+            unset($actualLock['hash'], $actualLock['content-hash'], $actualLock['_readme'], $actualLock['plugin-api-version']);
             $this->assertEquals($expectLock, $actualLock);
         }
 
+        if ($expectInstalled !== null) {
+            $actualInstalled = array();
+            $dumper = new ArrayDumper();
+
+            foreach ($repositoryManager->getLocalRepository()->getCanonicalPackages() as $package) {
+                $package = $dumper->dump($package);
+                unset($package['version_normalized']);
+                $actualInstalled[] = $package;
+            }
+
+            usort($actualInstalled, function ($a, $b) {
+                return strcmp($a['name'], $b['name']);
+            });
+
+            $this->assertSame($expectInstalled, $actualInstalled);
+        }
+
+        /** @var InstallationManagerMock $installationManager */
         $installationManager = $composer->getInstallationManager();
         $this->assertSame(rtrim($expect), implode("\n", $installationManager->getTrace()));
 
         if ($expectOutput) {
+            $output = preg_replace('{^    - .*?\.ini$}m', '__inilist__', $output);
+            $output = preg_replace('{(__inilist__\r?\n)+}', "__inilist__\n", $output);
+
             $this->assertStringMatchesFormat(rtrim($expectOutput), rtrim($output));
         }
     }
 
+    public function getSlowIntegrationTests()
+    {
+        return $this->loadIntegrationTests('installer-slow/');
+    }
+
     public function getIntegrationTests()
     {
-        $fixturesDir = realpath(__DIR__.'/Fixtures/installer/');
+        return $this->loadIntegrationTests('installer/');
+    }
+
+    public function loadIntegrationTests($path)
+    {
+        $fixturesDir = realpath(__DIR__.'/Fixtures/'.$path);
         $tests = array();
 
         foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($fixturesDir), \RecursiveIteratorIterator::LEAVES_ONLY) as $file) {
@@ -283,15 +411,16 @@ class InstallerTest extends TestCase
                 continue;
             }
 
-            $testData = $this->readTestFile($file, $fixturesDir);
-
-            $installed = array();
-            $installedDev = array();
-            $lock = array();
-            $expectLock = array();
-            $expectResult = 0;
-
             try {
+                $testData = $this->readTestFile($file, $fixturesDir);
+
+                $installed = array();
+                $installedDev = array();
+                $lock = array();
+                $expectLock = array();
+                $expectInstalled = null;
+                $expectResult = 0;
+
                 $message = $testData['TEST'];
                 $condition = !empty($testData['CONDITION']) ? $testData['CONDITION'] : null;
                 $composer = JsonFile::parseJson($testData['COMPOSER']);
@@ -328,6 +457,9 @@ class InstallerTest extends TestCase
                         $expectLock = JsonFile::parseJson($testData['EXPECT-LOCK']);
                     }
                 }
+                if (!empty($testData['EXPECT-INSTALLED'])) {
+                    $expectInstalled = JsonFile::parseJson($testData['EXPECT-INSTALLED']);
+                }
                 $expectOutput = isset($testData['EXPECT-OUTPUT']) ? $testData['EXPECT-OUTPUT'] : null;
                 $expect = $testData['EXPECT'];
                 if (!empty($testData['EXPECT-EXCEPTION'])) {
@@ -344,7 +476,7 @@ class InstallerTest extends TestCase
                 die(sprintf('Test "%s" is not valid: '.$e->getMessage(), str_replace($fixturesDir.'/', '', $file)));
             }
 
-            $tests[basename($file)] = array(str_replace($fixturesDir.'/', '', $file), $message, $condition, $composer, $lock, $installed, $run, $expectLock, $expectOutput, $expect, $expectResult);
+            $tests[basename($file)] = array(str_replace($fixturesDir.'/', '', $file), $message, $condition, $composer, $lock, $installed, $run, $expectLock, $expectInstalled, $expectOutput, $expect, $expectResult);
         }
 
         return $tests;
@@ -362,6 +494,7 @@ class InstallerTest extends TestCase
             'INSTALLED' => false,
             'RUN' => true,
             'EXPECT-LOCK' => false,
+            'EXPECT-INSTALLED' => false,
             'EXPECT-OUTPUT' => false,
             'EXPECT-EXIT-CODE' => false,
             'EXPECT-EXCEPTION' => false,
@@ -369,6 +502,7 @@ class InstallerTest extends TestCase
         );
 
         $section = null;
+        $data = array();
         foreach ($tokens as $i => $token) {
             if (null === $section && empty($token)) {
                 continue; // skip leading blank

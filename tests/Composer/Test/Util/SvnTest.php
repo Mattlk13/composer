@@ -16,7 +16,7 @@ use Composer\Config;
 use Composer\IO\NullIO;
 use Composer\Util\Platform;
 use Composer\Util\Svn;
-use PHPUnit\Framework\TestCase;
+use Composer\Test\TestCase;
 
 class SvnTest extends TestCase
 {
@@ -60,7 +60,7 @@ class SvnTest extends TestCase
         $reflMethod->setAccessible(true);
 
         $this->assertEquals(
-            $this->getCmd("svn ls --non-interactive  'http://svn.example.org'"),
+            $this->getCmd("svn ls --non-interactive  -- 'http://svn.example.org'"),
             $reflMethod->invokeArgs($svn, array('svn ls', $url))
         );
     }

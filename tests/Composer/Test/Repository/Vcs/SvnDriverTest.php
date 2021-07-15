@@ -16,7 +16,6 @@ use Composer\Repository\Vcs\SvnDriver;
 use Composer\Config;
 use Composer\Test\TestCase;
 use Composer\Util\Filesystem;
-use Composer\Util\Platform;
 
 class SvnDriverTest extends TestCase
 {
@@ -40,12 +39,12 @@ class SvnDriverTest extends TestCase
         $fs->removeDirectory($this->home);
     }
 
-    /**
-     * @expectedException RuntimeException
-     */
     public function testWrongCredentialsInUrl()
     {
+        $this->setExpectedException('RuntimeException');
+
         $console = $this->getMockBuilder('Composer\IO\IOInterface')->getMock();
+        $httpDownloader = $this->getMockBuilder('Composer\Util\HttpDownloader')->disableOriginalConstructor()->getMock();
 
         $output = "svn: OPTIONS of 'https://corp.svn.local/repo':";
         $output .= " authorization failed: Could not authenticate to server:";
@@ -66,7 +65,7 @@ class SvnDriverTest extends TestCase
             'url' => 'https://till:secret@corp.svn.local/repo',
         );
 
-        $svn = new SvnDriver($repoConfig, $console, $this->config, $process);
+        $svn = new SvnDriver($repoConfig, $console, $this->config, $httpDownloader, $process);
         $svn->initialize();
     }
 

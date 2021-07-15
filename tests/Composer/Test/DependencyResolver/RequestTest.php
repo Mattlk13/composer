@@ -14,11 +14,12 @@ namespace Composer\Test\DependencyResolver;
 
 use Composer\DependencyResolver\Request;
 use Composer\Repository\ArrayRepository;
+use Composer\Semver\Constraint\MatchAllConstraint;
 use Composer\Test\TestCase;
 
 class RequestTest extends TestCase
 {
-    public function testRequestInstallAndRemove()
+    public function testRequestInstall()
     {
         $repo = new ArrayRepository;
         $foo = $this->getPackage('foo', '1');
@@ -30,17 +31,13 @@ class RequestTest extends TestCase
         $repo->addPackage($foobar);
 
         $request = new Request();
-        $request->install('foo');
-        $request->fix('bar');
-        $request->remove('foobar');
+        $request->requireName('foo');
 
         $this->assertEquals(
             array(
-                array('cmd' => 'install', 'packageName' => 'foo', 'constraint' => null, 'fixed' => false),
-                array('cmd' => 'install', 'packageName' => 'bar', 'constraint' => null, 'fixed' => true),
-                array('cmd' => 'remove', 'packageName' => 'foobar', 'constraint' => null, 'fixed' => false),
+                'foo' => new MatchAllConstraint(),
             ),
-            $request->getJobs()
+            $request->getRequires()
         );
     }
 
@@ -56,25 +53,13 @@ class RequestTest extends TestCase
         $repo2->addPackage($foo2);
 
         $request = new Request();
-        $request->install('foo', $constraint = $this->getVersionConstraint('=', '1'));
+        $request->requireName('foo', $constraint = $this->getVersionConstraint('=', '1'));
 
         $this->assertEquals(
             array(
-                    array('cmd' => 'install', 'packageName' => 'foo', 'constraint' => $constraint, 'fixed' => false),
+                'foo' => $constraint,
             ),
-            $request->getJobs()
-        );
-    }
-
-    public function testUpdateAll()
-    {
-        $request = new Request();
-
-        $request->updateAll();
-
-        $this->assertEquals(
-            array(array('cmd' => 'update-all')),
-            $request->getJobs()
+            $request->getRequires()
         );
     }
 }

@@ -12,9 +12,15 @@
 
 namespace Composer\Test\Util;
 
+use Composer\IO\ConsoleIO;
 use Composer\Util\ProcessExecutor;
 use Composer\Test\TestCase;
 use Composer\IO\BufferIO;
+use React\Promise\Promise;
+use Symfony\Component\Console\Helper\HelperSet;
+use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Output\BufferedOutput;
+use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Output\StreamOutput;
 
 class ProcessExecutorTest extends TestCase
@@ -39,7 +45,7 @@ class ProcessExecutorTest extends TestCase
     {
         $io = $this->getMockBuilder('Composer\IO\IOInterface')->getMock();
         $io->expects($this->once())
-            ->method('write')
+            ->method('writeRaw')
             ->with($this->equalTo('foo'.PHP_EOL), false);
 
         $process = new ProcessExecutor($io);
@@ -98,5 +104,28 @@ class ProcessExecutorTest extends TestCase
         $this->assertEquals(array('foo', 'bar'), $process->splitLines("foo\nbar"));
         $this->assertEquals(array('foo', 'bar'), $process->splitLines("foo\r\nbar"));
         $this->assertEquals(array('foo', 'bar'), $process->splitLines("foo\r\nbar\n"));
+    }
+
+    public function testConsoleIODoesNotFormatSymfonyConsoleStyle()
+    {
+        $output = new BufferedOutput(OutputInterface::VERBOSITY_NORMAL, true);
+        $process = new ProcessExecutor(new ConsoleIO(new ArrayInput(array()), $output, new HelperSet(array())));
+
+        $process->execute('php -r "echo \'<error>foo</error>\'.PHP_EOL;"');
+        $this->assertSame('<error>foo</error>'.PHP_EOL, $output->fetch());
+    }
+
+    public function testExecuteAsyncCancel()
+    {
+        $process = new ProcessExecutor($buffer = new BufferIO('', StreamOutput::VERBOSITY_DEBUG));
+        $process->enableAsync();
+        $start = microtime(true);
+        /** @var Promise $promise */
+        $promise = $process->executeAsync('sleep 2');
+        $this->assertEquals(1, $process->countActiveJobs());
+        $promise->cancel();
+        $this->assertEquals(0, $process->countActiveJobs());
+        $end = microtime(true);
+        $this->assertTrue($end - $start < 0.5, 'Canceling took longer than it should, lasted '.($end - $start));
     }
 }

@@ -16,12 +16,15 @@ use Composer\Factory;
 use Composer\IO\IOInterface;
 use Composer\Config;
 use Composer\Composer;
+use Composer\Package\CompletePackageInterface;
 use Composer\Repository\CompositeRepository;
 use Composer\Repository\RepositoryFactory;
 use Composer\Script\ScriptEvents;
 use Composer\Plugin\CommandEvent;
 use Composer\Plugin\PluginEvents;
 use Composer\Util\Filesystem;
+use Composer\Util\Loop;
+use Composer\Util\ProcessExecutor;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -64,13 +67,19 @@ EOT
 
     protected function execute(InputInterface $input, OutputInterface $output)
     {
-        $config = Factory::createConfig();
         $composer = $this->getComposer(false);
+        $config = null;
+
         if ($composer) {
+            $config = $composer->getConfig();
             $commandEvent = new CommandEvent(PluginEvents::COMMAND, 'archive', $input, $output);
             $eventDispatcher = $composer->getEventDispatcher();
             $eventDispatcher->dispatch($commandEvent->getName(), $commandEvent);
             $eventDispatcher->dispatchScript(ScriptEvents::PRE_ARCHIVE_CMD);
+        }
+
+        if (!$config) {
+            $config = Factory::createConfig();
         }
 
         if (null === $input->getOption('format')) {
@@ -105,8 +114,10 @@ EOT
             $archiveManager = $composer->getArchiveManager();
         } else {
             $factory = new Factory;
-            $downloadManager = $factory->createDownloadManager($io, $config);
-            $archiveManager = $factory->createArchiveManager($config, $downloadManager);
+            $process = new ProcessExecutor();
+            $httpDownloader = Factory::createHttpDownloader($io, $config);
+            $downloadManager = $factory->createDownloadManager($io, $config, $httpDownloader, $process);
+            $archiveManager = $factory->createArchiveManager($config, $downloadManager, new Loop($httpDownloader, $process));
         }
 
         if ($packageName) {
@@ -130,6 +141,9 @@ EOT
         return 0;
     }
 
+    /**
+     * @return CompletePackageInterface|false
+     */
     protected function selectPackage(IOInterface $io, $packageName, $version = null)
     {
         $io->writeError('<info>Searching for the specified package.</info>');
@@ -159,6 +173,10 @@ EOT
             $io->writeError('<error>Could not find a package matching '.$packageName.'.</error>');
 
             return false;
+        }
+
+        if (!$package instanceof CompletePackageInterface) {
+            throw new \LogicException('Expected a CompletePackageInterface instance but found '.get_class($package));
         }
 
         return $package;

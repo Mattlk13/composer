@@ -20,16 +20,29 @@ use Composer\Test\TestCase;
  */
 class ErrorHandlerTest extends TestCase
 {
+    public function setUp()
+    {
+        ErrorHandler::register();
+    }
+
+    public function tearDown()
+    {
+        restore_error_handler();
+    }
+
     /**
      * Test ErrorHandler handles notices
      */
     public function testErrorHandlerCaptureNotice()
     {
-        $this->setExpectedException('\ErrorException', 'Undefined index: baz');
-
-        ErrorHandler::register();
+        if (PHP_VERSION_ID >= 80000) {
+            $this->setExpectedException('\ErrorException', 'Undefined array key "baz"');
+        } else {
+            $this->setExpectedException('\ErrorException', 'Undefined index: baz');
+        }
 
         $array = array('foo' => 'bar');
+        // @phpstan-ignore-next-line
         $array['baz'];
     }
 
@@ -38,20 +51,22 @@ class ErrorHandlerTest extends TestCase
      */
     public function testErrorHandlerCaptureWarning()
     {
-        $this->setExpectedException('\ErrorException', 'array_merge');
+        if (PHP_VERSION_ID >= 80000) {
+            $this->setExpectedException('TypeError', 'array_merge');
+        } else {
+            $this->setExpectedException('ErrorException', 'array_merge');
+        }
 
-        ErrorHandler::register();
-
+        // @phpstan-ignore-next-line
         array_merge(array(), 'string');
     }
 
     /**
      * Test ErrorHandler handles warnings
+     * @doesNotPerformAssertions
      */
     public function testErrorHandlerRespectsAtOperator()
     {
-        ErrorHandler::register();
-
         @trigger_error('test', E_USER_NOTICE);
     }
 }

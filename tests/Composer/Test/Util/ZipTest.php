@@ -13,14 +13,14 @@
 namespace Composer\Test\Util;
 
 use Composer\Util\Zip;
-use PHPUnit\Framework\TestCase;
+use Composer\Test\TestCase;
 
 /**
  * @author Andreas Schempp <andreas.schempp@terminal42.ch>
  */
 class ZipTest extends TestCase
 {
-    public function testThrowsExceptionIfZipExcentionIsNotLoaded()
+    public function testThrowsExceptionIfZipExtensionIsNotLoaded()
     {
         if (extension_loaded('zip')) {
             $this->markTestSkipped('The PHP zip extension is loaded.');
@@ -35,7 +35,6 @@ class ZipTest extends TestCase
     {
         if (!extension_loaded('zip')) {
             $this->markTestSkipped('The PHP zip extension is not loaded.');
-            return;
         }
 
         $result = Zip::getComposerJson(__DIR__.'/Fixtures/Zip/invalid.zip');
@@ -47,7 +46,6 @@ class ZipTest extends TestCase
     {
         if (!extension_loaded('zip')) {
             $this->markTestSkipped('The PHP zip extension is not loaded.');
-            return;
         }
 
         $result = Zip::getComposerJson(__DIR__.'/Fixtures/Zip/empty.zip');
@@ -55,35 +53,32 @@ class ZipTest extends TestCase
         $this->assertNull($result);
     }
 
-    public function testReturnsNullIfTheZipHasNoComposerJson()
+    public function testThrowsExceptionIfTheZipHasNoComposerJson()
     {
         if (!extension_loaded('zip')) {
             $this->markTestSkipped('The PHP zip extension is not loaded.');
-            return;
         }
 
-        $result = Zip::getComposerJson(__DIR__.'/Fixtures/Zip/nojson.zip');
+        $this->setExpectedException('\RuntimeException', 'No composer.json found either at the top level or within the topmost directory');
 
-        $this->assertNull($result);
+        Zip::getComposerJson(__DIR__.'/Fixtures/Zip/nojson.zip');
     }
 
-    public function testReturnsNullIfTheComposerJsonIsInASubSubfolder()
+    public function testThrowsExceptionIfTheComposerJsonIsInASubSubfolder()
     {
         if (!extension_loaded('zip')) {
             $this->markTestSkipped('The PHP zip extension is not loaded.');
-            return;
         }
 
-        $result = Zip::getComposerJson(__DIR__.'/Fixtures/Zip/subfolder.zip');
+        $this->setExpectedException('\RuntimeException', 'No composer.json found either at the top level or within the topmost directory');
 
-        $this->assertNull($result);
+        Zip::getComposerJson(__DIR__.'/Fixtures/Zip/subfolders.zip');
     }
 
     public function testReturnsComposerJsonInZipRoot()
     {
         if (!extension_loaded('zip')) {
             $this->markTestSkipped('The PHP zip extension is not loaded.');
-            return;
         }
 
         $result = Zip::getComposerJson(__DIR__.'/Fixtures/Zip/root.zip');
@@ -95,22 +90,30 @@ class ZipTest extends TestCase
     {
         if (!extension_loaded('zip')) {
             $this->markTestSkipped('The PHP zip extension is not loaded.');
-            return;
         }
 
         $result = Zip::getComposerJson(__DIR__.'/Fixtures/Zip/folder.zip');
-
         $this->assertEquals("{\n    \"name\": \"foo/bar\"\n}\n", $result);
     }
 
-    public function testReturnsRootComposerJsonAndSkipsSubfolders()
+    public function testMultipleTopLevelDirsIsInvalid()
     {
         if (!extension_loaded('zip')) {
             $this->markTestSkipped('The PHP zip extension is not loaded.');
-            return;
         }
 
-        $result = Zip::getComposerJson(__DIR__.'/Fixtures/Zip/multiple.zip');
+        $this->setExpectedException('\RuntimeException', 'Archive has more than one top level directories, and no composer.json was found on the top level, so it\'s an invalid archive. Top level paths found were: folder1/,folder2/');
+
+        Zip::getComposerJson(__DIR__.'/Fixtures/Zip/multiple.zip');
+    }
+
+    public function testReturnsComposerJsonFromFirstSubfolder()
+    {
+        if (!extension_loaded('zip')) {
+            $this->markTestSkipped('The PHP zip extension is not loaded.');
+        }
+
+        $result = Zip::getComposerJson(__DIR__.'/Fixtures/Zip/single-sub.zip');
 
         $this->assertEquals("{\n    \"name\": \"foo/bar\"\n}\n", $result);
     }

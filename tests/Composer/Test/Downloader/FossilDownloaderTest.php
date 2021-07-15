@@ -45,21 +45,20 @@ class FossilDownloaderTest extends TestCase
         return new FossilDownloader($io, $config, $executor, $filesystem);
     }
 
-    /**
-     * @expectedException \InvalidArgumentException
-     */
-    public function testDownloadForPackageWithoutSourceReference()
+    public function testInstallForPackageWithoutSourceReference()
     {
         $packageMock = $this->getMockBuilder('Composer\Package\PackageInterface')->getMock();
         $packageMock->expects($this->once())
             ->method('getSourceReference')
             ->will($this->returnValue(null));
 
+        $this->setExpectedException('InvalidArgumentException');
+
         $downloader = $this->getDownloaderMock();
-        $downloader->download($packageMock, '/path');
+        $downloader->install($packageMock, '/path');
     }
 
-    public function testDownload()
+    public function testInstall()
     {
         $packageMock = $this->getMockBuilder('Composer\Package\PackageInterface')->getMock();
         $packageMock->expects($this->any())
@@ -70,31 +69,28 @@ class FossilDownloaderTest extends TestCase
             ->will($this->returnValue(array('http://fossil.kd2.org/kd2fw/')));
         $processExecutor = $this->getMockBuilder('Composer\Util\ProcessExecutor')->getMock();
 
-        $expectedFossilCommand = $this->getCmd('fossil clone \'http://fossil.kd2.org/kd2fw/\' \'repo.fossil\'');
+        $expectedFossilCommand = $this->getCmd('fossil clone -- \'http://fossil.kd2.org/kd2fw/\' \'repo.fossil\'');
         $processExecutor->expects($this->at(0))
             ->method('execute')
             ->with($this->equalTo($expectedFossilCommand))
             ->will($this->returnValue(0));
 
-        $expectedFossilCommand = $this->getCmd('fossil open \'repo.fossil\' --nested');
+        $expectedFossilCommand = $this->getCmd('fossil open --nested -- \'repo.fossil\'');
         $processExecutor->expects($this->at(1))
             ->method('execute')
             ->with($this->equalTo($expectedFossilCommand))
             ->will($this->returnValue(0));
 
-        $expectedFossilCommand = $this->getCmd('fossil update \'trunk\'');
+        $expectedFossilCommand = $this->getCmd('fossil update -- \'trunk\'');
         $processExecutor->expects($this->at(2))
             ->method('execute')
             ->with($this->equalTo($expectedFossilCommand))
             ->will($this->returnValue(0));
 
         $downloader = $this->getDownloaderMock(null, null, $processExecutor);
-        $downloader->download($packageMock, 'repo');
+        $downloader->install($packageMock, 'repo');
     }
 
-    /**
-     * @expectedException \InvalidArgumentException
-     */
     public function testUpdateforPackageWithoutSourceReference()
     {
         $initialPackageMock = $this->getMockBuilder('Composer\Package\PackageInterface')->getMock();
@@ -103,8 +99,12 @@ class FossilDownloaderTest extends TestCase
             ->method('getSourceReference')
             ->will($this->returnValue(null));
 
+        $this->setExpectedException('InvalidArgumentException');
+
         $downloader = $this->getDownloaderMock();
+        $downloader->prepare('update', $sourcePackageMock, '/path', $initialPackageMock);
         $downloader->update($initialPackageMock, $sourcePackageMock, '/path');
+        $downloader->cleanup('update', $sourcePackageMock, '/path', $initialPackageMock);
     }
 
     public function testUpdate()
@@ -140,7 +140,9 @@ class FossilDownloaderTest extends TestCase
             ->will($this->returnValue(0));
 
         $downloader = $this->getDownloaderMock(null, null, $processExecutor);
+        $downloader->prepare('update', $packageMock, $this->workingDir, $packageMock);
         $downloader->update($packageMock, $packageMock, $this->workingDir);
+        $downloader->cleanup('update', $packageMock, $this->workingDir, $packageMock);
     }
 
     public function testRemove()
@@ -153,10 +155,10 @@ class FossilDownloaderTest extends TestCase
             ->method('execute')
             ->with($this->equalTo($expectedResetCommand));
         $filesystem = $this->getMockBuilder('Composer\Util\Filesystem')->getMock();
-        $filesystem->expects($this->any())
-            ->method('removeDirectory')
+        $filesystem->expects($this->once())
+            ->method('removeDirectoryAsync')
             ->with($this->equalTo('composerPath'))
-            ->will($this->returnValue(true));
+            ->will($this->returnValue(\React\Promise\resolve(true)));
 
         $downloader = $this->getDownloaderMock(null, null, $processExecutor, $filesystem);
         $downloader->remove($packageMock, 'composerPath');

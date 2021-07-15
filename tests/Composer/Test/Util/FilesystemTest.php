@@ -168,7 +168,7 @@ class FilesystemTest extends TestCase
 
         $fs = new Filesystem;
         $this->assertTrue($fs->removeDirectoryPhp($this->workingDir));
-        $this->assertFileNotExists($this->workingDir . "/level1/level2/hello.txt");
+        $this->assertFileDoesNotExist($this->workingDir . "/level1/level2/hello.txt");
     }
 
     public function testFileSize()
@@ -220,6 +220,7 @@ class FilesystemTest extends TestCase
             array('../src', 'Foo/Bar/../../../src'),
             array('c:../b', 'c:.\\..\\a\\..\\b'),
             array('phar://c:../Foo', 'phar://c:../Foo'),
+            array('//foo/bar', '\\\\foo\\bar'),
         );
     }
 
@@ -247,7 +248,7 @@ class FilesystemTest extends TestCase
         $fs = new Filesystem();
         $result = $fs->unlink($symlinked);
         $this->assertTrue($result);
-        $this->assertFileNotExists($symlinked);
+        $this->assertFileDoesNotExist($symlinked);
     }
 
     /**
@@ -279,8 +280,8 @@ class FilesystemTest extends TestCase
 
         $result = $fs->removeDirectory($symlinkedTrailingSlash);
         $this->assertTrue($result);
-        $this->assertFileNotExists($symlinkedTrailingSlash);
-        $this->assertFileNotExists($symlinked);
+        $this->assertFileDoesNotExist($symlinkedTrailingSlash);
+        $this->assertFileDoesNotExist($symlinked);
     }
 
     public function testJunctions()
